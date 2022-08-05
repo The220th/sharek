@@ -26,8 +26,20 @@
 
 void clearBUFFER(unsigned char* buffer);
 std::string bytes2str(const unsigned char* bytes, unsigned len);
-void transmitter(const char *pathToFile, const char *password, int port, const char* ip);
-void receiver(const char *pathToFile, const char *password, int port);
+
+/**
+ * if trans_reicev == false it is transmitter
+ * if trans_reicev == true it is receiver
+*/
+void client(bool trans_reicev, const char *pathToFile, const char *password, int port, const char* ip);
+
+/**
+ * if trans_reicev == false it is transmitter
+ * if trans_reicev == true it is receiver
+*/
+void server(bool trans_reicev, const char *pathToFile, const char *password, int port);
+void transmitter(int sock_fd, const char *pathToFile, const char *password);
+void receiver(int sock_fd, const char *pathToFile, const char *password);
 
 union Long64
 {
@@ -40,10 +52,23 @@ sharek out {ip} {port} {password} {filename}
   0     1    2     3        4         5
 sharek in {port} {password} {filename}
   0     1    2       3           4
+
+sharek out-c {ip} {port} {password} {filename}
+  0     1    2     3        4         5
+sharek out-s {port} {password} {filename}
+  0     1      3        4         5
+
+sharek in-s {port} {password} {filename}
+  0     1    2       3           4
+sharek in-c {ip} {port} {password} {filename}
+  0     1    2     3       4           5
 */
 int main(int argc, char *argv[])
 {
-    std::string ifSynErr("Expected: \"> sharek out {ip} {port} {password} {filename}\" or \"> sharek in {port} {password} {filename}\"");
+    std::string ifSynErr("Expected: \n> sharek out {ip} {port} {password} {filename} \nor \n> sharek in {port} {password} {filename} \nor \n");
+    ifSynErr += "> sharek out-c {ip} {port} {password} {filename} \nor \n> sharek out-s {port} {password} {filename} \nor\n";
+    ifSynErr += "> sharek in-s {port} {password} {filename} \nor \n> sharek in-c {ip} {port} {password} {filename} \n";
+    
     clog("Wake up");
     std::string buffS("");
     for(int li = 0; li < argc; ++li)
@@ -52,20 +77,33 @@ int main(int argc, char *argv[])
     if(!(argc == 6 || argc == 5))
         {std::cout << "Syntax error! " << ifSynErr << std::endl; return -1;}
 
-    if(strcmp(argv[1], "out") == 0)
+    if(strcmp(argv[1], "out") == 0 || strcmp(argv[1], "out-c") == 0)
     {
         if(argc != 6)
             {std::cout << "Syntax error! " << ifSynErr << std::endl; return -1;}
-        clog("I will be transmitter. ");
-
-        transmitter(argv[5], argv[4], atoi(argv[3]), argv[2]);
+        
+        client(false, argv[5], argv[4], atoi(argv[3]), argv[2]);
     }
-    else if(strcmp(argv[1], "in") == 0)
+    else if(strcmp(argv[1], "in") == 0 || strcmp(argv[1], "in-s") == 0)
     {
         if(argc != 5)
             {std::cout << "Syntax error! " << ifSynErr << std::endl; return -1;}
-        clog("I will be receiver. ");
-        receiver(argv[4], argv[3], atoi(argv[2]));
+        
+        server(true, argv[4], argv[3], atoi(argv[2]));
+    }
+    else if(strcmp(argv[1], "out-s") == 0)
+    {
+        if(argc != 5)
+            {std::cout << "Syntax error! " << ifSynErr << std::endl; return -1;}
+        
+        server(false, argv[4], argv[3], atoi(argv[2]));
+    }
+    else if(strcmp(argv[1], "in-c") == 0)
+    {
+        if(argc != 6)
+            {std::cout << "Syntax error! " << ifSynErr << std::endl; return -1;}
+        
+        client(true, argv[5], argv[4], atoi(argv[3]), argv[2]);
     }
     else
     {
@@ -75,13 +113,16 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-void transmitter(const char *pathToFile, const char *password, int port, const char* ip)
+/**
+ * if trans_reicev == false it is transmitter
+ * if trans_reicev == true it is receiver
+*/
+void client(bool trans_reicev, const char *pathToFile, const char *password, int port, const char* ip)
 {
     int sock;
     struct sockaddr_in addr;
-    AES256CBC aes;
-    unsigned char buff[BUFFER_LEN];
-    unsigned char buff_en[BUFFER_LEN];
+
+    clog("I will be client... ");
 
     clog("Creating socket... ");
     sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -102,6 +143,90 @@ void transmitter(const char *pathToFile, const char *password, int port, const c
         perror("connect");
         exit(2);
     }
+
+    if(trans_reicev)
+    {
+        receiver(sock, pathToFile, password);
+    }
+    else
+    {
+        transmitter(sock, pathToFile, password);
+    }
+
+    clog("Clossing socket... ");
+    close(sock);
+    clog("========== Done! ==========");
+}
+
+/**
+ * if trans_reicev == false it is transmitter
+ * if trans_reicev == true it is receiver
+*/
+void server(bool trans_reicev, const char *pathToFile, const char *password, int port)
+{
+    int server_fd, new_socket;
+    struct sockaddr_in address;
+    int addrlen = sizeof(address);
+
+    clog("I will be server... ");
+
+    clog("Creating socket... ");
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
+    {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(port);
+
+    clog(std::string("Binding socket: PORT=") + std::to_string(port) + "... ");
+    if (bind(server_fd, (struct sockaddr*)&address,
+             sizeof(address)) < 0)
+    {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+    clog("Start listen... ");
+    if (listen(server_fd, 1) < 0)
+    {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+    if ((new_socket = accept(server_fd, 
+                (struct sockaddr*)&address,
+                (socklen_t*)&addrlen)) < 0)
+    {
+        perror("accept");
+        exit(EXIT_FAILURE);
+    }
+    clog(std::string("New connection: ") + std::string(inet_ntoa(address.sin_addr)) + std::string(":") + std::to_string(htons(address.sin_port)));
+
+    if(trans_reicev)
+    {
+        receiver(new_socket, pathToFile, password);
+    }
+    else
+    {
+        transmitter(new_socket, pathToFile, password);
+    }
+
+    clog("Clossing socket... ");
+    close(new_socket);
+    clog("Clossing server... ");
+    shutdown(server_fd, SHUT_RDWR);
+    clog("========== Done! ==========");
+}
+
+void transmitter(int sock_fd, const char *pathToFile, const char *password)
+{
+    AES256CBC aes;
+    unsigned char buff[BUFFER_LEN];
+    unsigned char buff_en[BUFFER_LEN];
+
+    clog("I will be transmitter. ");
 
     clog(std::string("Openning file (rb): \"") + std::string(pathToFile) + std::string("\"... "));
     /*
@@ -146,7 +271,7 @@ void transmitter(const char *pathToFile, const char *password, int port, const c
         iv[li] = iv_buff[li];
     
     aes.EncryptCBC(buff, buff_en, BUFFER_LEN, key, iv);
-    send(sock, buff_en, BUFFER_LEN, 0);
+    send(sock_fd, buff_en, BUFFER_LEN, 0);
 
     clog("Transmitting... ");
     const unsigned beforePercentOut_begin = sz/(100*16*2);
@@ -170,7 +295,7 @@ void transmitter(const char *pathToFile, const char *password, int port, const c
 		
 		fread(buff, sizeof(unsigned char), cur_block_size, fptr);
         aes.EncryptCBC(buff, buff_en, BUFFER_LEN, key, iv);
-        send(sock, buff_en, BUFFER_LEN, 0);
+        send(sock_fd, buff_en, BUFFER_LEN, 0);
 
         --beforePercentOut;
         if(beforePercentOut == 0)
@@ -196,60 +321,23 @@ void transmitter(const char *pathToFile, const char *password, int port, const c
     for(unsigned li = 0; li < 16; ++li)
         buff[li] = filehash[li];
     aes.EncryptCBC(buff, buff_en, BUFFER_LEN, key, iv);
-    send(sock, buff_en, BUFFER_LEN, 0);
+    send(sock_fd, buff_en, BUFFER_LEN, 0);
 
     for(unsigned li = 0; li < 16; ++li)
         buff[li] = filehash[16 + li];
     aes.EncryptCBC(buff, buff_en, BUFFER_LEN, key, iv);
-    send(sock, buff_en, BUFFER_LEN, 0);
+    send(sock_fd, buff_en, BUFFER_LEN, 0);
 
-    clog("Clossing socket. ");
-    close(sock);
-    clog("========== Done! ==========");
+    clog("=====Transmitting finished=====");
 }
 
-void receiver(const char *pathToFile, const char *password, int port)
+void receiver(int sock_fd, const char *pathToFile, const char *password)
 {
     AES256CBC aes;
     unsigned char buff[BUFFER_LEN];
     unsigned char buff_en[BUFFER_LEN];
-    int server_fd, new_socket;
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
 
-    clog("Creating socket... ");
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0)
-    {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
-
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(port);
-
-    clog(std::string("Binding socket: PORT=") + std::to_string(port) + "... ");
-    if (bind(server_fd, (struct sockaddr*)&address,
-             sizeof(address)) < 0)
-    {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
-
-    clog("Start listen... ");
-    if (listen(server_fd, 1) < 0)
-    {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
-    if ((new_socket = accept(server_fd, 
-                (struct sockaddr*)&address,
-                (socklen_t*)&addrlen)) < 0)
-    {
-        perror("accept");
-        exit(EXIT_FAILURE);
-    }
-    clog(std::string("New connection: ") + std::string(inet_ntoa(address.sin_addr)) + std::string(":") + std::to_string(htons(address.sin_port)));
+    clog("I will be receiver. ");
 
     clog("Generating key and iv...");
 
@@ -264,7 +352,7 @@ void receiver(const char *pathToFile, const char *password, int port)
 
     clog("Getting info block: file size and keycheck... ");
     clearBUFFER(buff_en);
-    read(new_socket, buff_en, BUFFER_LEN);
+    read(sock_fd, buff_en, BUFFER_LEN);
     aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
 
     clog(std::string("Info block received: ") + bytes2str(buff, BUFFER_LEN));
@@ -272,14 +360,14 @@ void receiver(const char *pathToFile, const char *password, int port)
     if(!(buff[9] == 133 && buff[10] == 50 && buff[11] == 51 && buff[12] == 7))
     {
         std::cout << "Key does not match. " << std::endl;
-        clog("keycheck failed. Key does not match. ");
+        clog("\n==============================\n\n!!!!! keycheck failed. Keys do not match. !!!!!\n\n==============================\n");
         return;
     }
     union Long64 file_size;
     for(unsigned li = 0; li < 8; ++li)
         file_size.c[li] = buff[li];
     long sz = file_size.l;
-clog(std::string("Size of file will be: ") + std::to_string(sz) + std::string(" bytes. "));
+    clog(std::string("Size of file will be: ") + std::to_string(sz) + std::string(" bytes. "));
 
     clog("Openning file (wb): \"" + std::string(pathToFile) + std::string("\"... "));
 	FILE *fptr;
@@ -309,7 +397,7 @@ clog(std::string("Size of file will be: ") + std::to_string(sz) + std::string(" 
             c = 0;
         }
 		//c-=BS; c=(c>0?c:0);
-        read(new_socket, buff_en, BUFFER_LEN);
+        read(sock_fd, buff_en, BUFFER_LEN);
         aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
 		
 		fwrite(buff, sizeof(unsigned char), cur_block_size, fptr);
@@ -337,12 +425,12 @@ clog(std::string("Size of file will be: ") + std::to_string(sz) + std::string(" 
     calc_file_hash(pathToFile, filehash);
 
     clog("Receiving file hash... ");
-    read(new_socket, buff_en, BUFFER_LEN);
+    read(sock_fd, buff_en, BUFFER_LEN);
     aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
     for(unsigned li = 0; li < 16; ++li)
         filehash_received[li] = buff[li];
     
-    read(new_socket, buff_en, BUFFER_LEN);
+    read(sock_fd, buff_en, BUFFER_LEN);
     aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
     for(unsigned li = 0; li < 16; ++li)
         filehash_received[16 + li] = buff[li];
@@ -361,10 +449,7 @@ clog(std::string("Size of file will be: ") + std::to_string(sz) + std::string(" 
     else
         clog("\n==============================\n\n!!!!! Hash of file does not match !!!!!\n\n==============================\n");
 
-    clog("Clossing socket. ");
-    close(new_socket);
-    shutdown(server_fd, SHUT_RDWR);
-    clog("========== Done! ==========");
+    clog("=====Receiving finished=====");
 }
 
 std::string bytes2str(const unsigned char* bytes, unsigned len)

@@ -1,6 +1,6 @@
 CC=g++
-CFLAGS=-c -Wall
-LDFLAGS=-ggdb
+CFLAGS=-c -Wall -O2
+LDFLAGS=-ggdb -O2
 #INCLUDE_FOLDER=-I./include/
 
 SOURCES=sharek.cpp AES256CBC.cpp ssha256.cpp log.cpp
