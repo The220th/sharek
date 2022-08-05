@@ -28,7 +28,7 @@
 
 void clearBUFFER(unsigned char* buffer);
 std::string bytes2str(const unsigned char* bytes, unsigned len);
-void read_N_bytes_from_socket(int sock_fd, unsigned char *buffer, unsigned N);
+inline void read_N_bytes_from_socket(int sock_fd, unsigned char *buffer, unsigned N);
 
 /**
  * if trans_reicev == false it is transmitter
@@ -294,11 +294,10 @@ void transmitter(int sock_fd, const char *pathToFile, const char *password)
             clearBUFFER(buff);
             c = 0;
         }
-		//c-=BS; c=(c>0?c:0);
 		
 		fread(buff, sizeof(unsigned char), cur_block_size, fptr);
-        std::cout << "Readed: " << bytes2str(buff, BUFFER_LEN) << std::endl;
-        //aes.EncryptCBC(buff, buff_en, BUFFER_LEN, key, iv);
+        //std::cout << "Readed: " << bytes2str(buff, BUFFER_LEN) << std::endl;
+        aes.EncryptCBC(buff, buff_en, BUFFER_LEN, key, iv);
         send(sock_fd, buff_en, BUFFER_LEN, 0);
         //std::cout << "Sended: " << bytes2str(buff_en, BUFFER_LEN) << std::endl;
 
@@ -357,7 +356,8 @@ void receiver(int sock_fd, const char *pathToFile, const char *password)
 
     clog("Getting info block: file size and keycheck... ");
     clearBUFFER(buff_en);
-    read(sock_fd, buff_en, BUFFER_LEN);
+    //read(sock_fd, buff_en, BUFFER_LEN);
+    read_N_bytes_from_socket(sock_fd, buff_en, BUFFER_LEN);
     aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
 
     clog(std::string("Info block received: ") + bytes2str(buff, BUFFER_LEN));
@@ -393,9 +393,9 @@ void receiver(int sock_fd, const char *pathToFile, const char *password)
 	long cur_block_size;
 	while(c > 0)
 	{
-        int buff_cnt; ioctl(sock_fd, FIONREAD, &buff_cnt);
-        if(buff_cnt < BUFFER_LEN)
-            continue;
+        //int buff_cnt; ioctl(sock_fd, FIONREAD, &buff_cnt);
+        //if(buff_cnt < BUFFER_LEN)
+        //    continue;
         //usleep(5000);
 		cur_block_size = c>BUFFER_LEN?BUFFER_LEN:c;
 		if(c > BUFFER_LEN)
@@ -405,8 +405,9 @@ void receiver(int sock_fd, const char *pathToFile, const char *password)
             clearBUFFER(buff);
             c = 0;
         }
-		//c-=BS; c=(c>0?c:0);
-        read(sock_fd, buff_en, BUFFER_LEN);
+
+        //read(sock_fd, buff_en, BUFFER_LEN);
+        read_N_bytes_from_socket(sock_fd, buff_en, BUFFER_LEN);
         //std::cout << "Received: " << bytes2str(buff_en, BUFFER_LEN) << std::endl;
         aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
 		
@@ -436,12 +437,14 @@ void receiver(int sock_fd, const char *pathToFile, const char *password)
     calc_file_hash(pathToFile, filehash);
 
     clog("Receiving file hash... ");
-    read(sock_fd, buff_en, BUFFER_LEN);
+    //read(sock_fd, buff_en, BUFFER_LEN);
+    read_N_bytes_from_socket(sock_fd, buff_en, BUFFER_LEN);
     aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
     for(unsigned li = 0; li < 16; ++li)
         filehash_received[li] = buff[li];
     
-    read(sock_fd, buff_en, BUFFER_LEN);
+    //read(sock_fd, buff_en, BUFFER_LEN);
+    read_N_bytes_from_socket(sock_fd, buff_en, BUFFER_LEN);
     aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
     for(unsigned li = 0; li < 16; ++li)
         filehash_received[16 + li] = buff[li];
@@ -463,9 +466,23 @@ void receiver(int sock_fd, const char *pathToFile, const char *password)
     clog("=====Receiving finished=====");
 }
 
-void read_N_bytes_from_socket(int sock_fd, unsigned char *buffer, unsigned N)
+inline void read_N_bytes_from_socket(int sock_fd, unsigned char *buffer, unsigned N)
 {
-
+    if(N == 0)
+        return;
+    unsigned left = N;
+    unsigned i = 0;
+    int readed;
+    unsigned char *buff = (unsigned char*)malloc(N*sizeof(unsigned char));
+    // Не проще buff в виде аргумента передавать, вместо того, чтобы каждый раз выделять память?!
+    do
+    {
+        readed = read(sock_fd, buff, left);
+        for(int li = 0; li < readed; ++li)
+            buffer[i++] = buff[li];
+        left -= readed;
+    }while(left != 0);
+    free(buff);
 }
 
 std::string bytes2str(const unsigned char* bytes, unsigned len)

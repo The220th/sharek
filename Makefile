@@ -1,6 +1,7 @@
 CC=g++
 CFLAGS=-c -Wall -O2
-LDFLAGS=-ggdb -O2
+LDFLAGS=-O2
+#LDFLAGS=-ggdb
 #INCLUDE_FOLDER=-I./include/
 
 SOURCES=sharek.cpp AES256CBC.cpp ssha256.cpp log.cpp
@@ -12,10 +13,10 @@ all: $(SOURCES) $(EXECUTABLE) CLEAN
 
 	
 $(EXECUTABLE): $(OBJECTS) 
-	$(CC) $(INCLUDE_FOLDER) $(LDFLAGS) $(OBJECTS) -o $@
+	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
 .cpp.o:
-	$(CC) $(INCLUDE_FOLDER) $(CFLAGS) $< -o $@
+	$(CC) $(CFLAGS) $< -o $@
 
 CLEAN:
 	find . -name "*.o" -delete
