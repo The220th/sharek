@@ -16,6 +16,8 @@
 #include <cstdio>
 #include <cstdlib>
 
+#include <unistd.h>
+
 #include "./include/ssha256.h"
 #include "./include/AES256CBC.h"
 #include "./include/log.h"
@@ -26,6 +28,7 @@
 
 void clearBUFFER(unsigned char* buffer);
 std::string bytes2str(const unsigned char* bytes, unsigned len);
+void read_N_bytes_from_socket(int sock_fd, unsigned char *buffer, unsigned N);
 
 /**
  * if trans_reicev == false it is transmitter
@@ -294,8 +297,10 @@ void transmitter(int sock_fd, const char *pathToFile, const char *password)
 		//c-=BS; c=(c>0?c:0);
 		
 		fread(buff, sizeof(unsigned char), cur_block_size, fptr);
-        aes.EncryptCBC(buff, buff_en, BUFFER_LEN, key, iv);
+        std::cout << "Readed: " << bytes2str(buff, BUFFER_LEN) << std::endl;
+        //aes.EncryptCBC(buff, buff_en, BUFFER_LEN, key, iv);
         send(sock_fd, buff_en, BUFFER_LEN, 0);
+        //std::cout << "Sended: " << bytes2str(buff_en, BUFFER_LEN) << std::endl;
 
         --beforePercentOut;
         if(beforePercentOut == 0)
@@ -388,6 +393,10 @@ void receiver(int sock_fd, const char *pathToFile, const char *password)
 	long cur_block_size;
 	while(c > 0)
 	{
+        int buff_cnt; ioctl(sock_fd, FIONREAD, &buff_cnt);
+        if(buff_cnt < BUFFER_LEN)
+            continue;
+        //usleep(5000);
 		cur_block_size = c>BUFFER_LEN?BUFFER_LEN:c;
 		if(c > BUFFER_LEN)
             c-=BUFFER_LEN;
@@ -398,9 +407,11 @@ void receiver(int sock_fd, const char *pathToFile, const char *password)
         }
 		//c-=BS; c=(c>0?c:0);
         read(sock_fd, buff_en, BUFFER_LEN);
+        //std::cout << "Received: " << bytes2str(buff_en, BUFFER_LEN) << std::endl;
         aes.DecryptCBC(buff_en, buff, BUFFER_LEN, key, iv);
 		
 		fwrite(buff, sizeof(unsigned char), cur_block_size, fptr);
+        //std::cout << "Writed: " << bytes2str(buff, BUFFER_LEN) << std::endl;
 
         --beforePercentOut;
         if(beforePercentOut == 0)
@@ -450,6 +461,11 @@ void receiver(int sock_fd, const char *pathToFile, const char *password)
         clog("\n==============================\n\n!!!!! Hash of file does not match !!!!!\n\n==============================\n");
 
     clog("=====Receiving finished=====");
+}
+
+void read_N_bytes_from_socket(int sock_fd, unsigned char *buffer, unsigned N)
+{
+
 }
 
 std::string bytes2str(const unsigned char* bytes, unsigned len)
